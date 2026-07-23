@@ -1,0 +1,5 @@
+sample_id	snv_vcf	cnv_bed	assembly	expected_gene	notes
+tay_sachs	input/tay_sachs/snv.vcf	input/tay_sachs/cnv.bed	GRCh38	HEXA	synthetic educational data
+kabuki	input/kabuki/snv.vcf	input/kabuki/cnv.bed	GRCh38	KMT2D	synthetic educational data
+sotos	input/sotos/snv.vcf	input/sotos/cnv.bed	GRCh38	NSD1	synthetic educational data
+noonan	input/noonan/snv.vcf	input/noonan/cnv.bed	GRCh38	PTPN11	synthetic educational data
