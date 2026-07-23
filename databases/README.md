@@ -1,11 +1,11 @@
 
-# 🗄️ Annotation Databases & References Directory
+#  Annotation Databases & References Directory
 
 This directory stores reference genomes, variant caches, pathogenicity predictor scores, and database indexes.
 
-> ⚠️ **Note:** Files in this directory (except `.gitkeep` and this `README.md`) are excluded from Git tracking via `.gitignore` due to file size constraints.
+>  **Note:** Files in this directory (except `.gitkeep` and this `README.md`) are excluded from Git tracking via `.gitignore` due to file size constraints.
 
-## 📁 Required Database Directory Layout
+##  Required Database Directory Layout
 
 ```text
 databases/
