@@ -1,5 +1,5 @@
 ```bash
-cat << 'EOF' > input/README.md
+
 # Input Data Directory
 
 Place all raw patient VCFs and target region BED files here before starting an analysis run.
