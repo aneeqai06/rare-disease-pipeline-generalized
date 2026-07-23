@@ -317,3 +317,236 @@ At this stage, the following components should be successfully installed:
 - Required Perl modules
 
 The next section of this guide covers the installation of the bioinformatics tools required for the annotation pipeline, including **bcftools**, **tabix**, **bgzip**, **Ensembl VEP**, **SnpEff**, **ANNOVAR**, and **InterVar**.
+---
+
+# 11. Installing bcftools
+
+## Purpose
+
+`bcftools` is one of the core utilities used throughout this pipeline. It provides tools for manipulating Variant Call Format (VCF) and Binary Call Format (BCF) files, including normalization, filtering, indexing, querying, and validation.
+
+Within this pipeline, `bcftools` is used to:
+
+- Validate VCF files
+- Normalize variants
+- Left-align insertions and deletions
+- Split multiallelic variants
+- Compress and index output files
+- Perform quality control checks
+
+## Installation
+
+Install bcftools using APT:
+
+```bash
+sudo apt update
+sudo apt install -y bcftools
+```
+
+Alternatively, install through Conda:
+
+```bash
+conda install -c bioconda bcftools
+```
+
+## Verification
+
+```bash
+bcftools --version
+```
+
+Expected output:
+
+```
+bcftools 1.xx
+```
+
+---
+
+# 12. Installing bgzip and tabix
+
+## Purpose
+
+`bgzip` compresses genomic files while preserving random access capability.
+
+`tabix` indexes compressed genomic files for efficient querying.
+
+These tools are essential when working with:
+
+- ClinVar
+- gnomAD
+- AlphaMissense
+- REVEL
+- dbNSFP
+
+Most annotation tools require indexed annotation databases.
+
+## Installation
+
+```bash
+sudo apt install tabix
+```
+
+or
+
+```bash
+conda install -c bioconda htslib
+```
+
+## Verification
+
+```bash
+bgzip --help
+```
+
+```bash
+tabix --help
+```
+
+Both commands should display the program help menu.
+
+---
+
+# 13. Installing Ensembl Variant Effect Predictor (VEP)
+
+## Purpose
+
+The Ensembl Variant Effect Predictor (VEP) predicts the biological consequences of genomic variants. It annotates variants with transcript, gene, protein, and regulatory information using the Ensembl database.
+
+Within this pipeline, VEP performs the primary functional annotation of variants.
+
+## Clone the Repository
+
+```bash
+git clone https://github.com/Ensembl/ensembl-vep.git
+```
+
+Move into the repository:
+
+```bash
+cd ensembl-vep
+```
+
+## Install VEP
+
+Run the installer:
+
+```bash
+perl INSTALL.pl
+```
+
+The installer allows you to download:
+
+- VEP cache
+- FASTA reference
+- Plugins
+
+These can also be installed separately if preferred.
+
+## Verification
+
+```bash
+vep --help
+```
+
+The command should display the VEP help page without errors.
+
+---
+
+# 14. Installing the VEP Cache
+
+## Purpose
+
+The VEP cache stores precomputed Ensembl annotations, allowing VEP to annotate variants quickly without querying remote servers.
+
+Using the cache significantly improves annotation speed and reproducibility.
+
+## Installation
+
+Download the cache using the VEP installer:
+
+```bash
+perl INSTALL.pl
+```
+
+Select:
+
+- Homo sapiens
+- GRCh38
+- Cache files
+
+The cache will be downloaded to the default VEP cache directory unless a custom location is specified.
+
+## Verification
+
+```bash
+vep --cache --help
+```
+
+---
+
+# 15. Installing VEP Plugins
+
+## Purpose
+
+VEP plugins extend the annotation capabilities of the Variant Effect Predictor by incorporating additional prediction scores and external resources.
+
+Common plugins used in this pipeline include:
+
+- REVEL
+- AlphaMissense
+- dbNSFP (optional)
+
+## Installation
+
+Download the required plugin files into the VEP plugins directory.
+
+Ensure that any associated data files (such as REVEL or AlphaMissense score tables) are downloaded, compressed with `bgzip`, and indexed using `tabix`.
+
+## Verification
+
+Run a small test annotation using one of the installed plugins and confirm that the corresponding annotation fields are added to the output.
+
+---
+
+# 16. Installing SnpEff
+
+## Purpose
+
+SnpEff predicts the effects of genomic variants on genes and transcripts. It provides standardized annotations such as coding consequences, amino acid changes, and predicted impact.
+
+Within this project, SnpEff complements VEP by providing an additional annotation source for comparison and downstream analysis.
+
+## Installation
+
+Download the latest SnpEff release from the official repository or install it through Conda.
+
+Using Conda:
+
+```bash
+conda install -c bioconda snpeff
+```
+
+## Verification
+
+```bash
+snpEff -version
+```
+
+The installed version should be displayed successfully.
+
+---
+
+# 17. Summary
+
+At this stage, the following software should be installed and verified:
+
+- bcftools
+- bgzip
+- tabix
+- Ensembl VEP
+- VEP Cache
+- VEP Plugins
+- SnpEff
+
+The next section of this guide will cover the installation and configuration of ANNOVAR, InterVar, annotation databases, and final environment verification.
