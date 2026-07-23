@@ -1,10 +1,10 @@
-# 🧬 Generalized Rare Disease Variant Annotation Pipeline
+#  Generalized Rare Disease Variant Annotation Pipeline
 
 > A reproducible, modular, and educational bioinformatics workflow for annotating, prioritizing, and interpreting human genetic variants associated with rare diseases.
 
 ---
 
-## 📖 Overview
+##  Overview
 
 The **Generalized Rare Disease Variant Annotation Pipeline** is an open-source bioinformatics workflow designed to support the functional and clinical annotation of human genetic variants identified through next-generation sequencing (NGS). Starting from a Variant Call Format (VCF) file, the pipeline integrates widely used annotation tools and publicly available genomic databases to generate biologically meaningful and clinically relevant annotations.
 
@@ -14,7 +14,7 @@ In addition to the workflow itself, this repository serves as an educational res
 
 ---
 
-# 🎯 Objectives
+#  Objectives
 
 This project aims to:
 
@@ -27,7 +27,7 @@ This project aims to:
 
 ---
 
-# ✨ Features
+#  Features
 
 - Reproducible workflow
 - Modular design
@@ -42,7 +42,7 @@ This project aims to:
 
 ---
 
-# 🔬 Pipeline Workflow
+#  Pipeline Workflow
 
 ```
                     Input VCF
@@ -88,7 +88,7 @@ This project aims to:
 
 ---
 
-# 🛠️ Software
+#  Software
 
 | Software | Purpose |
 |-----------|---------|
@@ -105,7 +105,7 @@ This project aims to:
 
 ---
 
-# 🗄️ Annotation Databases
+#  Annotation Databases
 
 The pipeline supports integration with several public databases.
 
@@ -120,7 +120,7 @@ The pipeline supports integration with several public databases.
 
 ---
 
-# 📂 Repository Structure
+#  Repository Structure
 
 ```text
 rare-disease-pipeline-generalized/
@@ -141,7 +141,7 @@ rare-disease-pipeline-generalized/
 
 ---
 
-# 📚 Documentation
+#  Documentation
 
 | File | Description |
 |------|-------------|
@@ -157,7 +157,7 @@ rare-disease-pipeline-generalized/
 
 ---
 
-# 📓 Educational Resources
+#  Educational Resources
 
 Interactive notebooks will accompany the documentation to explain:
 
@@ -176,19 +176,19 @@ Interactive notebooks will accompany the documentation to explain:
 
 ---
 
-# 📄 License
+#  License
 
 The licensing information for this project will be added before the first stable release.
 
 ---
 
-# 📖 Citation
+#  Citation
 
 Citation information will be added upon the first public release of the project.
 
 
 ---
 
-## ⭐ Acknowledgements
+##  Acknowledgements
 
 This project builds upon widely used open-source bioinformatics software and publicly available genomic databases. We gratefully acknowledge the developers and maintainers of these resources.
