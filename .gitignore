@@ -1,0 +1,57 @@
+
+# ==============================================================================
+# LARGE ANNOTATION DATABASES & REFERENCES
+# ==============================================================================
+databases/*
+!databases/.gitkeep
+!databases/README.md
+
+# Ignore specific large file extensions inside databases/
+*.fa
+*.fasta
+*.fa.fai
+*.fasta.fai
+*.vcf.gz
+*.vcf.gz.tbi
+*.tsv.gz
+*.tsv.gz.tbi
+*.tar.gz
+*.zip
+
+# Specialized database tools & caches
+annovar/humandb/*
+!annovar/humandb/.gitkeep
+containers/*.sif
+!containers/.gitkeep
+
+# ==============================================================================
+# INPUT DATA & PATIENT VCFS (Privacy & Size)
+# ==============================================================================
+input/*
+!input/.gitkeep
+!input/README.md
+*.vcf
+*.bed
+*.bam
+*.sam
+*.cram
+
+# ==============================================================================
+# PIPELINE OUTPUTS & LOGS
+# ==============================================================================
+output/*
+!output/.gitkeep
+!output/README.md
+logs/*
+*.log
+
+# ==============================================================================
+# NEXTFLOW & SYSTEM INTERMEDIATES
+# ==============================================================================
+.nextflow/
+.nextflow.log*
+work/
+.DS_Store
+*.swp
+*~
+EOF
