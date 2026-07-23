@@ -1,4 +1,3 @@
-cat << 'EOF' > config/README.md
 # Configuration & Sample Sheet Directory
 
 This directory contains configuration templates and sample metadata sheets required to run the pipeline.
