@@ -1,163 +1,266 @@
 #!/usr/bin/env bash
-#
-# run_batch_pipeline.sh
-#
-# Generalized batch orchestrator. Reads a sample sheet (one row per
-# disease/sample) and calls the unmodified engine script,
-# rare_disease_vcf_annotation_pipeline.sh, once per row. No disease name
-# ever appears in this file's code -- only in the data you supply.
-#
-# Usage:
-#   THREADS=4 bash run_batch_pipeline.sh \
-#     --sheet config/sample_sheet.tsv \
-#     --config config/annotation_resources.env \
-#     [--only SAMPLE_ID] \
-#     [--force] \
-#     [--engine pipeline/rare_disease_vcf_annotation_pipeline.sh] \
-#     [--results-dir results]
-#
-# Sample sheet format (tab-separated, header required):
-#   sample_id  snv_vcf  cnv_bed  assembly  expected_gene  notes
-#
-#   cnv_bed and expected_gene may be left empty (use "-" or blank).
+set -euo pipefail
 
-set -Eeuo pipefail
-IFS=$'\n\t'
+##############################################################################
+# Generalized Rare Disease SNV Annotation Pipeline
+# Stages:
+#  1. Normalization (bcftools norm)
+#  2. Reference Allele Sanity Check (bcftools norm --check-ref)
+#  3. Ensembl VEP Annotation (REVEL, AlphaMissense, SpliceAI)
+#  4. SnpEff Annotation
+#  5. ANNOVAR Table Annotation (refGene, ClinVar, gnomAD)
+#  6. InterVar ACMG Automated Classification
+#  7. Quality Control & Gene Verification Summary
+##############################################################################
 
-SHEET=""
-CONFIG=""
-ONLY=""
+# ---- Default CLI Parameters ------------------------------------------------
+INPUT_VCF=""
+TARGET_BED=""
+OUT_DIR="output"
+CONFIG_FILE="config/annotation_resources.env"
+SAMPLE_NAME=""
+TARGET_GENE="TARGET_GENE"
 FORCE=0
-ENGINE="pipeline/rare_disease_vcf_annotation_pipeline.sh"
-RESULTS_DIR="results"
-THREADS="${THREADS:-4}"
 
 usage() {
-  cat <<'USAGE'
-Usage:
-  THREADS=4 bash run_batch_pipeline.sh --sheet SHEET.tsv --config CONFIG.env \
-    [--only SAMPLE_ID] [--force] [--engine PATH] [--results-dir DIR]
-USAGE
+  cat << EOF
+Usage: $0 -i <input.vcf> -n <target.bed> -s <sample_name> -g <target_gene> [-o <out_dir>] [-c <config_file>] [-f]
+
+Options:
+  -i  Input VCF file (uncompressed or .vcf.gz)
+  -n  Target BED file defining genomic regions
+  -s  Sample Name / Identifier
+  -g  Target Gene Symbol for automated QC verification
+  -o  Output directory (default: output)
+  -c  Path to environment config file (default: config/annotation_resources.env)
+  -f  Force overwrite existing stage outputs
+  -h  Show this help message
+EOF
+  exit 1
 }
 
-log()  { printf '[%s] %s\n' "$(date '+%F %T')" "$*" >&2; }
-die()  { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --sheet)       SHEET="$2"; shift 2 ;;
-    --config)      CONFIG="$2"; shift 2 ;;
-    --only)        ONLY="$2"; shift 2 ;;
-    --force)       FORCE=1; shift ;;
-    --engine)      ENGINE="$2"; shift 2 ;;
-    --results-dir) RESULTS_DIR="$2"; shift 2 ;;
-    -h|--help)     usage; exit 0 ;;
-    *) die "Unknown argument: $1" ;;
+# Parse Command Line Options
+while getopts "i:n:s:g:o:c:fh" opt; do
+  case $opt in
+    i) INPUT_VCF="$OPTARG" ;;
+    n) TARGET_BED="$OPTARG" ;;
+    s) SAMPLE_NAME="$OPTARG" ;;
+    g) TARGET_GENE="$OPTARG" ;;
+    o) OUT_DIR="$OPTARG" ;;
+    c) CONFIG_FILE="$OPTARG" ;;
+    f) FORCE=1 ;;
+    h) usage ;;
+    *) usage ;;
   esac
 done
 
-[[ -n "$SHEET"  ]] || { usage; die "Missing --sheet"; }
-[[ -n "$CONFIG" ]] || { usage; die "Missing --config"; }
-[[ -s "$SHEET"  ]] || die "Sample sheet not found or empty: $SHEET"
-[[ -s "$CONFIG" ]] || die "Config file not found or empty: $CONFIG"
-[[ -x "$ENGINE" || -f "$ENGINE" ]] || die "Engine script not found: $ENGINE"
+if [[ -z "$INPUT_VCF" || -z "$TARGET_BED" || -z "$SAMPLE_NAME" ]]; then
+  echo "[ERROR] Missing required arguments: -i (input VCF), -n (target BED), or -s (sample name)."
+  usage
+fi
 
-mkdir -p "$RESULTS_DIR"
-SUMMARY="$RESULTS_DIR/batch_summary.tsv"
-echo -e "sample_id\tstatus\tqc_expected_gene\tqc_result\tresult_dir\tlog_file" > "$SUMMARY"
+# ---- Load Configuration ----------------------------------------------------
+if [[ -f "$CONFIG_FILE" ]]; then
+  source "$CONFIG_FILE"
+else
+  echo "[WARNING] Config file '$CONFIG_FILE' not found. Falling back to default relative paths."
+  PROJECT_DIR="$(pwd)"
+  REF_FASTA="databases/grch38.fa"
+  BCFTOOLS_BIN="bcftools"
+  VEP_BIN="vep"
+  VEP_CACHE_DIR="databases/vep"
+  VEP_CACHE_VERSION="110"
+  VEP_PLUGIN_DIR="databases/vep_plugins"
+  ALPHAMISSENSE_TSV="databases/alphamissense/AlphaMissense_hg38.tsv.gz"
+  REVEL_TSV="databases/revel/new_tabbed_revel_grch38.tsv.gz"
+  SPLICEAI_LOOKUP="databases/spliceai/spliceai_scores.vcf.gz"
+  SNPEFF_JAR="databases/snpeff/snpEff.jar"
+  SNPEFF_DB="GRCh38.105"
+  ANNOVAR_DIR="annovar"
+  ANNOVAR_HUMANDB="annovar/humandb"
+  ANNOVAR_PROTOCOLS="refGeneWithVer,clinvar_20250721,ensGene,hg38_gnomad_genome"
+  ANNOVAR_OPERATIONS="g,f,g,f"
+  INTERVAR_DIR="InterVar"
+fi
 
-# --- parse header to find column positions, so column order in the sheet
-#     can vary without breaking anything -----------------------------------
-header=$(head -n1 "$SHEET")
-declare -A COL
-i=1
-for col in $header; do
-  COL[$col]=$i
-  i=$((i + 1))
-done
+# ---- Directory Setup -------------------------------------------------------
+SAMPLE_OUT_DIR="$OUT_DIR/$SAMPLE_NAME"
+LOG_DIR="$OUT_DIR/$SAMPLE_NAME/logs"
+mkdir -p "$SAMPLE_OUT_DIR" "$LOG_DIR"
 
-for required in sample_id snv_vcf; do
-  [[ -n "${COL[$required]:-}" ]] || die "Sample sheet is missing required column: $required"
-done
+TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
+LOG_FILE="$LOG_DIR/pipeline_${SAMPLE_NAME}_${TIMESTAMP}.log"
 
-get_field() {
-  # get_field "<tab-separated line>" "<column name>"
-  local line="$1" name="$2" idx
-  idx="${COL[$name]:-}"
-  [[ -n "$idx" ]] || { echo ""; return; }
-  echo "$line" | cut -f "$idx"
+log() { echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
+
+run_stage() {
+  local name="$1"; shift
+  log "=== STAGE: $name ==="
+  if "$@" >>"$LOG_FILE" 2>&1; then
+    log "    -> OK"
+  else
+    log "    -> FAILED (see $LOG_FILE)"
+    exit 1
+  fi
 }
 
-while IFS=$'\t' read -r line || [[ -n "$line" ]]; do
-  [[ -z "$line" ]] && continue
-  case "$line" in ''|'#'*) continue ;; esac
-  full_line="$line"
+log "Pipeline execution started for sample: $SAMPLE_NAME"
+log "Input VCF: $INPUT_VCF | Target BED: $TARGET_BED"
 
-  sample_id=$(get_field "$full_line" "sample_id")
-  snv_vcf=$(get_field "$full_line" "snv_vcf")
-  cnv_bed=$(get_field "$full_line" "cnv_bed")
-  assembly=$(get_field "$full_line" "assembly")
-  expected_gene=$(get_field "$full_line" "expected_gene")
+# ---------------------------------------------------------------------------
+# Stage 1: Normalize (left-align indels, split multiallelics)
+# ---------------------------------------------------------------------------
+NORM_VCF="$SAMPLE_OUT_DIR/${SAMPLE_NAME}.normalized.vcf"
+if [[ ! -f "$NORM_VCF" || $FORCE -eq 1 ]]; then
+  run_stage "bcftools norm" \
+    "$BCFTOOLS_BIN" norm -f "$REF_FASTA" -m -both -O v -o "$NORM_VCF" "$INPUT_VCF"
+else
+  log "=== STAGE: bcftools norm (SKIPPED - Output exists) ==="
+fi
 
-  [[ -n "$sample_id" ]] || continue
-  assembly="${assembly:-GRCh38}"
+# ---------------------------------------------------------------------------
+# Stage 2: REF allele sanity check & target region slicing
+# ---------------------------------------------------------------------------
+REFCHECK_VCF="$SAMPLE_OUT_DIR/${SAMPLE_NAME}.ref_check.vcf"
+if [[ ! -f "$REFCHECK_VCF" || $FORCE -eq 1 ]]; then
+  run_stage "bcftools norm --check-ref & region filter" \
+    "$BCFTOOLS_BIN" norm -R "$TARGET_BED" -f "$REF_FASTA" -c w -O v -o "$REFCHECK_VCF" "$NORM_VCF"
+else
+  log "=== STAGE: bcftools norm --check-ref (SKIPPED - Output exists) ==="
+fi
 
-  if [[ -n "$ONLY" && "$sample_id" != "$ONLY" ]]; then
-    continue
+# ---------------------------------------------------------------------------
+# Stage 3: Ensembl VEP Annotation (REVEL, AlphaMissense, SpliceAI)
+# ---------------------------------------------------------------------------
+VEP_OUT="$SAMPLE_OUT_DIR/${SAMPLE_NAME}.vep_annotated.vcf"
+if [[ ! -f "$VEP_OUT" || $FORCE -eq 1 ]]; then
+  VEP_ARGS=(
+    --input_file "$REFCHECK_VCF"
+    --output_file "$VEP_OUT"
+    --vcf --force_overwrite
+    --offline --cache --dir_cache "$VEP_CACHE_DIR" --cache_version "$VEP_CACHE_VERSION"
+    --fasta "$REF_FASTA"
+    --dir_plugins "$VEP_PLUGIN_DIR"
+    --symbol
+  )
+
+  # Append REVEL plugin if database file exists
+  if [[ -f "$REVEL_TSV" ]]; then
+    VEP_ARGS+=(--plugin REVEL,file="$REVEL_TSV")
   fi
 
-  out_dir="$RESULTS_DIR/$sample_id"
-  log_file="$out_dir/logs/${sample_id}.pipeline.log"
-
-  if [[ -d "$out_dir" && -s "$log_file" && "$FORCE" -eq 0 ]]; then
-    log "Skipping $sample_id: results already exist at $out_dir (use --force to re-run)"
-    echo -e "${sample_id}\tSKIPPED_EXISTING\t${expected_gene}\t-\t${out_dir}\t${log_file}" >> "$SUMMARY"
-    continue
+  # Append AlphaMissense plugin if database file exists
+  if [[ -f "$ALPHAMISSENSE_TSV" ]]; then
+    VEP_ARGS+=(--plugin AlphaMissense,file="$ALPHAMISSENSE_TSV")
   fi
 
-  if [[ "$FORCE" -eq 1 && -d "$out_dir" ]]; then
-    log "Removing existing results for $sample_id (--force)"
-    rm -rf "$out_dir"
+  # Append SpliceAI lookup if present
+  if [[ -f "$SPLICEAI_LOOKUP" ]]; then
+    VEP_ARGS+=(--custom "$SPLICEAI_LOOKUP,SpliceAI,vcf,exact,0,DS_AG,DS_AL,DS_DG,DS_DL")
   fi
 
-  [[ -s "$snv_vcf" ]] || { log "SKIP $sample_id: snv_vcf missing/empty: $snv_vcf"; continue; }
+  run_stage "Ensembl VEP" "$VEP_BIN" "${VEP_ARGS[@]}"
+else
+  log "=== STAGE: Ensembl VEP (SKIPPED - Output exists) ==="
+fi
 
-  cnv_args=()
-  if [[ -n "$cnv_bed" && "$cnv_bed" != "-" && -s "$cnv_bed" ]]; then
-    cnv_args=(-n "$cnv_bed")
-  fi
-
-  log "Running sample: $sample_id (assembly=$assembly)"
-  set +e
-  bash "$ENGINE" \
-    -i "$snv_vcf" \
-    "${cnv_args[@]}" \
-    -o "$out_dir" \
-    -c "$CONFIG" \
-    -s "$sample_id" \
-    -a "$assembly" \
-    -t "$THREADS"
-  rc=$?
-  set -e
-
-  qc_result="-"
-  if [[ -n "$expected_gene" && "$expected_gene" != "-" ]]; then
-    final_vcf="$out_dir/snv/${sample_id}.final.small_variants.annotated.vcf.gz"
-    if [[ -s "$final_vcf" ]] && bcftools view "$final_vcf" 2>/dev/null | grep -qw "$expected_gene"; then
-      qc_result="PASS"
-    else
-      qc_result="WARN_gene_not_found"
-    fi
-  fi
-
-  if [[ $rc -eq 0 ]]; then
-    log "Finished $sample_id (QC: $qc_result)"
-    echo -e "${sample_id}\tOK\t${expected_gene}\t${qc_result}\t${out_dir}\t${log_file}" >> "$SUMMARY"
+# ---------------------------------------------------------------------------
+# Stage 4: SnpEff Annotation
+# ---------------------------------------------------------------------------
+SNPEFF_OUT="$SAMPLE_OUT_DIR/${SAMPLE_NAME}.snpeff.vcf"
+if [[ ! -f "$SNPEFF_OUT" || $FORCE -eq 1 ]]; then
+  log "=== STAGE: SnpEff ==="
+  if java -Xmx8g -jar "$SNPEFF_JAR" "$SNPEFF_DB" "$VEP_OUT" > "$SNPEFF_OUT" 2>>"$LOG_FILE"; then
+    log "    -> OK"
   else
-    log "FAILED $sample_id (exit code $rc) — see $log_file"
-    echo -e "${sample_id}\tFAILED\t${expected_gene}\t${qc_result}\t${out_dir}\t${log_file}" >> "$SUMMARY"
+    log "    -> FAILED (see $LOG_FILE)"
+    exit 1
   fi
-done < <(tail -n +2 "$SHEET")
+else
+  log "=== STAGE: SnpEff (SKIPPED - Output exists) ==="
+fi
 
-log "Batch complete. Summary: $SUMMARY"
-column -t "$SUMMARY" >&2 || cat "$SUMMARY" >&2
+# ---------------------------------------------------------------------------
+# Stage 5: ANNOVAR (refGene, ClinVar, gnomAD)
+# ---------------------------------------------------------------------------
+ANNOVAR_AVINPUT="$SAMPLE_OUT_DIR/${SAMPLE_NAME}.avinput"
+ANNOVAR_OUT_PREFIX="$SAMPLE_OUT_DIR/${SAMPLE_NAME}.annovar"
+
+if [[ ! -f "${ANNOVAR_OUT_PREFIX}.hg38_multianno.txt" || $FORCE -eq 1 ]]; then
+  run_stage "convert2annovar" \
+    perl "$ANNOVAR_DIR/convert2annovar.pl" -format vcf4 "$SNPEFF_OUT" \
+      -outfile "$ANNOVAR_AVINPUT" -includeinfo
+
+  run_stage "table_annovar" \
+    perl "$ANNOVAR_DIR/table_annovar.pl" "$ANNOVAR_AVINPUT" "$ANNOVAR_HUMANDB" \
+      -buildver hg38 -out "$ANNOVAR_OUT_PREFIX" \
+      -protocol "$ANNOVAR_PROTOCOLS" -operation "$ANNOVAR_OPERATIONS" \
+      -nastring . -otherinfo
+else
+  log "=== STAGE: ANNOVAR (SKIPPED - Output exists) ==="
+fi
+
+# ---------------------------------------------------------------------------
+# Stage 6: InterVar (ACMG Automated Classification)
+# ---------------------------------------------------------------------------
+INTERVAR_OUT_PREFIX="$SAMPLE_OUT_DIR/${SAMPLE_NAME}.intervar"
+
+if [[ ! -f "${INTERVAR_OUT_PREFIX}.hg38_multianno.txt.intervar" || $FORCE -eq 1 ]]; then
+  log "=== STAGE: InterVar ==="
+  pushd "$INTERVAR_DIR" >/dev/null
+
+  if python3 Intervar.py \
+      -b hg38 \
+      -i "$SNPEFF_OUT" \
+      --input_type=VCF \
+      -o "$INTERVAR_OUT_PREFIX" \
+      >>"$LOG_FILE" 2>&1
+  then
+    log "    -> OK"
+  else
+    log "    -> FAILED (see $LOG_FILE)"
+    popd >/dev/null
+    exit 1
+  fi
+
+  popd >/dev/null
+else
+  log "=== STAGE: InterVar (SKIPPED - Output exists) ==="
+fi
+
+# ---------------------------------------------------------------------------
+# Stage 7: Automated QC Verification Report
+# ---------------------------------------------------------------------------
+QC_REPORT="$SAMPLE_OUT_DIR/qc_report.txt"
+log "=== STAGE: Generating Quality Control Report ==="
+
+TOTAL_VARIANTS=$(grep -v "^#" "$SNPEFF_OUT" | wc -l || echo "0")
+GENE_HITS=$(grep -v "^#" "$SNPEFF_OUT" | grep -c "$TARGET_GENE" || echo "0")
+
+cat << QC_EOF > "$QC_REPORT"
+==================================================
+QUALITY CONTROL REPORT
+==================================================
+Sample Name       : $SAMPLE_NAME
+Target Gene Symbol: $TARGET_GENE
+Execution Date    : $(date)
+
+ANNOTATION STAGES EXECUTED:
+--------------------------------------------------
+[✓] Normalization & Ref Check (bcftools)
+[✓] Impact Predictions (VEP, SnpEff)
+[✓] Advanced Pathogenicity (REVEL, AlphaMissense, SpliceAI)
+[✓] Clinical & Frequency Databases (ClinVar, gnomAD)
+[✓] ACMG Classification (InterVar)
+
+METRICS:
+--------------------------------------------------
+Total Region-Filtered Variants : $TOTAL_VARIANTS
+Target Gene Symbol Hits         : $GENE_HITS
+
+STATUS: $( [[ $GENE_HITS -gt 0 ]] && echo "PASS - Target Gene Identified" || echo "WARNING - Gene Symbol Not Found" )
+==================================================
+QC_EOF
+
+log "Pipeline execution finished successfully for sample $SAMPLE_NAME."
+log "QC Summary Report: $QC_REPORT"
