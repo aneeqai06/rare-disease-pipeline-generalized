@@ -1,4 +1,4 @@
-cat << 'EOF' > output/README.md
+
 #  Pipeline Results Directory
 
 Generated analysis outputs and logs land here, organized into sample-specific subdirectories (`output/<sample_id>/`).
